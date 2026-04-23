@@ -20,7 +20,6 @@
             padding: 15px 25px; border-radius: 0; display: block;
         }
 
-        /* --- 工具列容器 --- */
         .side-panel { position: fixed; z-index: 1001; }
 
         @media (min-width: 769px) {
@@ -35,39 +34,25 @@
         }
 
         @media (max-width: 768px) {
-            .side-panel {
-                bottom: 0; left: 0; width: 100%;
-                pointer-events: none; /* 平時點擊穿透 */
-            }
+            .side-panel { bottom: 0; left: 0; width: 100%; pointer-events: none; }
 
-            /* 修正把手位置：貼緊最下方，水平置中 */
             .mobile-handle {
-                pointer-events: auto;
-                position: absolute;
-                bottom: 0; left: 50%;
-                transform: translateX(-50%); /* 完美的水平置中 */
-                height: 45px; width: 140px;
-                background: var(--panel-bg);
+                pointer-events: auto; position: absolute;
+                bottom: 0; left: 50%; transform: translateX(-50%);
+                height: 45px; width: 140px; background: var(--panel-bg);
                 display: flex; align-items: center; justify-content: center;
                 font-weight: bold; color: var(--primary); cursor: pointer;
-                box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
-                z-index: 1002;
+                box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 1002;
             }
 
             .panel-content {
-                pointer-events: auto;
-                background: var(--panel-bg);
-                max-height: 65vh; overflow-y: auto;
-                padding: 15px; width: 100%;
-                transition: transform 0.3s ease;
-                transform: translateY(100%);
+                pointer-events: auto; background: var(--panel-bg);
+                max-height: 65vh; overflow-y: auto; padding: 15px; width: 100%;
+                transition: transform 0.3s ease; transform: translateY(100%);
                 box-shadow: 0 -2px 20px rgba(0,0,0,0.15);
             }
 
-            /* 展開時內容往上推，把手跟著往上移動 */
             .side-panel.open .panel-content { transform: translateY(0); }
-            .side-panel.open .mobile-handle { bottom: 65vh; transform: translateX(-50%) translateY(100%); display: none; } 
-            /* 註：展開後如果不想看到把手可以像上面那樣 display: none，或微調 bottom */
         }
 
         .section-title { font-size: 14px; font-weight: bold; margin-top: 15px; border-left: 4px solid var(--primary); padding-left: 8px; margin-bottom: 8px; }
@@ -86,7 +71,6 @@
         
         .popup-btn { background: var(--primary); color: white; border: none; padding: 10px; border-radius: 0; margin-top: 8px; cursor: pointer; width: 100%; }
         select { border-radius: 0; padding: 5px; border: 1px solid #ccc; }
-
         .copyright { margin-top: 20px; padding-top: 10px; border-top: 1px solid #eee; font-size: 10px; color: #999; text-align: center; }
     </style>
 </head>
@@ -103,10 +87,10 @@
         <div class="input-group">
             <input type="text" id="poi-name" placeholder="名稱 (例如：長灘島)">
             <div style="display: flex; gap: 5px;">
-                <input type="number" id="poi-lat" step="any" placeholder="緯度">
-                <input type="number" id="poi-lng" step="any" placeholder="經度">
+                <input type="number" id="poi-lat" step="any" placeholder="緯度" onfocus="minimizePanel()">
+                <input type="number" id="poi-lng" step="any" placeholder="經度" onfocus="minimizePanel()">
             </div>
-            <p style="font-size: 10px; color: #666; margin: 2px 0;">* 點擊地圖可自動獲取座標</p>
+            <p style="font-size: 10px; color: #666; margin: 2px 0;">* 點擊輸入框可隱藏清單並點選地圖</p>
             <button class="btn-add" onclick="addNewPOI()">確認新增</button>
         </div>
 
@@ -129,7 +113,7 @@
             <button class="btn btn-load" onclick="triggerImport()">📥 匯入</button>
         </div>
 
-        <div class="section-title">📍 已去過</div>
+        <div class="section-title">🚩 已去過</div>
         <ul id="country-list"></ul>
 
         <div class="copyright">Copyright © Titleman Cloud</div>
@@ -138,7 +122,6 @@
 </div>
 
 <script>
-// ... (保留之前的 JS 邏輯不變) ...
 let visitedCountries = JSON.parse(localStorage.getItem('myVisitedCountries')) || [];
 let customPOIs = JSON.parse(localStorage.getItem('myCustomPOIs')) || [
     { name: "Guam (關島)", coords: [13.4443, 144.7937] },
@@ -151,7 +134,29 @@ function autoFitWorld() { const zoomLevel = window.innerWidth < 768 ? 1.0 : 2.2;
 autoFitWorld();
 poiLayers.addTo(map);
 
-map.on('click', (e) => { document.getElementById('poi-lat').value = e.latlng.lat.toFixed(4); document.getElementById('poi-lng').value = e.latlng.lng.toFixed(4); });
+// 修正點：點擊地圖獲取座標並彈回面板
+map.on('click', (e) => { 
+    document.getElementById('poi-lat').value = e.latlng.lat.toFixed(4); 
+    document.getElementById('poi-lng').value = e.latlng.lng.toFixed(4); 
+    
+    if (window.innerWidth <= 768) {
+        setTimeout(() => {
+            const panel = document.getElementById('ui-panel');
+            panel.classList.add('open');
+            document.getElementById('main-handle').style.opacity = "0";
+        }, 300);
+    }
+});
+
+function minimizePanel() {
+    if (window.innerWidth <= 768) {
+        const panel = document.getElementById('ui-panel');
+        if (panel.classList.contains('open')) {
+            panel.classList.remove('open');
+            document.getElementById('main-handle').style.opacity = "1";
+        }
+    }
+}
 
 fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson')
     .then(r => r.json()).then(data => {
@@ -170,10 +175,10 @@ function updateUI() { document.getElementById('map').style.background = document
 function focusCountry(name) { if (window.innerWidth <= 768) togglePanel(); let found = false; geoLayer.eachLayer(layer => { if (layer.feature.properties.name === name) { map.flyToBounds(layer.getBounds(), { padding: [50, 50], duration: 1.2 }); found = true; } }); if (!found) { const poi = customPOIs.find(p => p.name === name); if (poi) map.flyTo(poi.coords, 7, { duration: 1.2 }); } }
 function togglePanel() { 
     if (window.innerWidth <= 768) {
-        document.getElementById('ui-panel').classList.toggle('open');
-        // 展開時隱藏下方把手，避免擋到內容
+        const panel = document.getElementById('ui-panel');
+        panel.classList.toggle('open');
         const handle = document.getElementById('main-handle');
-        handle.style.opacity = document.getElementById('ui-panel').classList.contains('open') ? "0" : "1";
+        handle.style.opacity = panel.classList.contains('open') ? "0" : "1";
     }
 }
 function resetView() { autoFitWorld(); }
