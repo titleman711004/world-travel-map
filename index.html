@@ -2,6 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>旅遊足跡</title>
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -9,15 +10,34 @@
 
     <style>
         :root { --panel-bg: rgba(255, 255, 255, 0.95); }
-        body { margin: 0; font-family: "Microsoft JhengHei", sans-serif; overflow: hidden; }
+        body { margin: 0; font-family: "Microsoft JhengHei", sans-serif; overflow: hidden; touch-action: none; }
         #map { height: 100vh; background: #d1ecf1; }
 
+        /* 電腦版樣式 (維持現狀) */
         .side-panel {
             position: fixed; top: 20px; left: 20px; z-index: 1000;
             width: 280px; background: var(--panel-bg);
             padding: 20px; border-radius: 12px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.2);
             max-height: 90vh; display: flex; flex-direction: column; gap: 10px;
+        }
+
+        /* 手機版樣式調整 */
+        @media (max-width: 768px) {
+            .side-panel {
+                top: auto; bottom: 0; left: 0; right: 0;
+                width: 100%; max-height: 40vh; /* 佔據螢幕下方 40% */
+                border-radius: 20px 20px 0 0;
+                padding: 15px;
+                box-sizing: border-box;
+            }
+            .section-title { margin-top: 5px; font-size: 13px; }
+            .btn-group { gap: 3px; }
+            .btn { padding: 6px; font-size: 11px; }
+            #country-list { min-height: 80px; }
+            
+            /* 讓地圖上半部留空，方便縮放 */
+            #map { height: 65vh; } 
         }
 
         .section-title { font-size: 14px; font-weight: bold; color: #333; margin-top: 10px; border-left: 4px solid #2c3e50; padding-left: 8px; }
@@ -56,48 +76,39 @@
 
 <div class="side-panel">
     <div class="section-title">🎨 地圖風格</div>
-    <select id="bg-color-select" onchange="updateStyles()">
-        <option value="#f8d7da">淡紅</option>
-        <option value="#fff3cd">淡黃</option>
-        <option value="#d4edda">淡綠</option>
-        <option value="#d1ecf1" selected>淡藍 (海洋)</option>
-        <option value="#cce5ff">淡靛</option>
-        <option value="#333333">黑色</option>
-        <option value="#ffffff">白色</option>
-    </select>
-
-    <select id="visit-color-select" onchange="updateStyles()">
-        <option value="#ff4757" selected>去過：鮮紅</option>
-        <option value="#ffa502">去過：橘色</option>
-        <option value="#2ed573">去過：翠綠</option>
-        <option value="#1e90ff">去過：道奇藍</option>
-    </select>
-
-    <button id="label-btn" class="btn btn-toggle" onclick="toggleLabels()">🏷️ 隱藏名稱</button>
-
-    <div class="section-title">💾 資料與視角</div>
-    <div class="btn-group">
-        <button class="btn btn-reset" onclick="resetView()">🌐 初始全圖 (不重複)</button>
-        <button class="btn btn-save" onclick="exportBackup()">📋 複製備份代碼</button>
-        <button class="btn btn-load" onclick="triggerImport()">📥 貼上代碼匯入</button>
+    <div style="display: flex; gap: 5px;">
+        <select id="bg-color-select" onchange="updateStyles()">
+            <option value="#d1ecf1" selected>海洋：藍</option>
+            <option value="#333333">海洋：黑</option>
+            <option value="#ffffff">海洋：白</option>
+        </select>
+        <select id="visit-color-select" onchange="updateStyles()">
+            <option value="#ff4757" selected>足跡：紅</option>
+            <option value="#ffa502">足跡：橘</option>
+            <option value="#2ed573">足跡：綠</option>
+        </select>
     </div>
 
-    <div class="section-title">🚩 已去過 (自動存檔)</div>
+    <button id="label-btn" class="btn btn-toggle" onclick="toggleLabels()">🏷️ 顯示/隱藏名稱</button>
+
+    <div class="section-title">💾 備份與視角</div>
+    <div class="btn-group">
+        <button class="btn btn-reset" onclick="resetView()">🌐 全圖</button>
+        <button class="btn btn-save" onclick="exportBackup()">📋 複製</button>
+        <button class="btn btn-load" onclick="triggerImport()">📥 匯入</button>
+    </div>
+
+    <div class="section-title">🚩 已去過</div>
     <ul id="country-list"></ul>
 </div>
 
 <div id="map"></div>
 
 <script>
-// --- 1. 初始化資料與自定義點位 ---
 let visitedCountries = JSON.parse(localStorage.getItem('myVisitedCountries')) || [];
 let showLabels = true;
-let geoLayer;
-let labelLayer = L.layerGroup();
-let lineLayer = L.layerGroup();
-let poiLayers = L.layerGroup();
+let geoLayer, labelLayer = L.layerGroup(), lineLayer = L.layerGroup(), poiLayers = L.layerGroup();
 
-// 自定義座標：解決 GeoJSON 缺少的小地點
 const customPOIs = [
     { name: "Guam (關島)", coords: [13.4443, 144.7937] },
     { name: "Subic Bay (蘇比克灣)", coords: [14.8219, 120.2762] }
@@ -107,14 +118,12 @@ const map = L.map('map', {
     attributionControl: false,
     zoomSnap: 0.1,
     zoomControl: false,
-    worldCopyJump: false,
     maxBounds: [[-90, -180], [90, 180]],
     maxBoundsViscosity: 1.0
 }).setView([20, 0], 2);
 
 L.control.zoom({ position: 'topright' }).addTo(map);
 
-// 2. 載入 GeoJSON
 fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson')
     .then(r => r.json())
     .then(data => {
@@ -128,18 +137,13 @@ fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/mast
             }
         }).addTo(map);
         updateUI();
-    })
-    .catch(err => alert("地圖載入失敗！"));
+    });
 
-// 3. 核心邏輯
 function styleFunc(feature) {
     const visitColor = document.getElementById('visit-color-select').value;
-    const isVisited = visitedCountries.includes(feature.properties.name);
     return {
-        fillColor: isVisited ? visitColor : "#e9e9e9",
-        weight: 1,
-        color: "#ffffff",
-        fillOpacity: 1
+        fillColor: visitedCountries.includes(feature.properties.name) ? visitColor : "#e9e9e9",
+        weight: 1, color: "#ffffff", fillOpacity: 1
     };
 }
 
@@ -147,31 +151,23 @@ function updateStyles() {
     const bgColor = document.getElementById('bg-color-select').value;
     const visitColor = document.getElementById('visit-color-select').value;
     document.getElementById('map').style.background = bgColor;
-    
     if (geoLayer) geoLayer.setStyle(styleFunc);
-    
-    drawCustomPOIs(visitColor); // 繪製關島/蘇比克灣圓點
+    drawCustomPOIs(visitColor);
     drawSmartLabels();
 }
 
-// 繪製自定義小點
 function drawCustomPOIs(visitColor) {
     poiLayers.clearLayers();
     customPOIs.forEach(poi => {
         const isVisited = visitedCountries.includes(poi.name);
-        const circle = L.circleMarker(poi.coords, {
-            radius: 4,
+        L.circleMarker(poi.coords, {
+            radius: 4, // 縮小圓點
             fillColor: isVisited ? visitColor : "#e9e9e9",
-            color: "#333",
-            weight: 0.8,
-            fillOpacity: 1
+            color: "#333", weight: 0.8, fillOpacity: 1
         }).on('click', (e) => {
             L.DomEvent.stopPropagation(e);
             toggleCountry(poi.name);
-        });
-        
-        circle.bindTooltip(poi.name, { direction: 'top', offset: [0, -3] });
-        circle.addTo(poiLayers);
+        }).bindTooltip(poi.name, { direction: 'top', offset: [0, -3] }).addTo(poiLayers);
     });
     poiLayers.addTo(map);
 }
@@ -180,131 +176,82 @@ function toggleCountry(name) {
     const i = visitedCountries.indexOf(name);
     if (i > -1) visitedCountries.splice(i, 1);
     else visitedCountries.push(name);
-    
-    saveToStorage();
+    localStorage.setItem('myVisitedCountries', JSON.stringify(visitedCountries));
     updateUI();
 }
 
 function updateUI() {
     updateStyles();
-    updateCountryList();
-}
-
-function updateCountryList() {
     const listEl = document.getElementById('country-list');
     listEl.innerHTML = visitedCountries.length > 0 
         ? visitedCountries.map(name => `<li onclick="focusCountry('${name}')"><span>📍 ${name}</span> 🔍</li>`).join('')
-        : '<li style="color:#999; justify-content:center;">尚未標記國家</li>';
-}
-
-function saveToStorage() {
-    localStorage.setItem('myVisitedCountries', JSON.stringify(visitedCountries));
-}
-
-// 4. 功能性函式
-function resetView() {
-    map.flyTo([20, 0], 2, { duration: 1.5 });
+        : '<li style="color:#999; justify-content:center;">尚未標記</li>';
 }
 
 function focusCountry(name) {
     let found = false;
-    // 搜尋國家
     geoLayer.eachLayer(layer => {
         if (layer.feature.properties.name === name) {
-            map.flyToBounds(layer.getBounds(), { padding: [40, 40], duration: 1.2 });
+            map.flyToBounds(layer.getBounds(), { padding: [20, 20], duration: 1.2 });
             found = true;
         }
     });
-    // 搜尋自定義點
     if (!found) {
         const poi = customPOIs.find(p => p.name === name);
         if (poi) map.flyTo(poi.coords, 7, { duration: 1.2 });
     }
 }
 
+function resetView() { map.flyTo([20, 0], 2, { duration: 1.5 }); }
+
 function toggleLabels() {
     showLabels = !showLabels;
-    const btn = document.getElementById('label-btn');
-    btn.innerText = showLabels ? "🏷️ 隱藏名稱" : "🏷️ 顯示名稱";
-    btn.classList.toggle('inactive', !showLabels);
-    
-    if (showLabels) {
-        labelLayer.addTo(map);
-        lineLayer.addTo(map);
-        drawSmartLabels();
-    } else {
-        map.removeLayer(labelLayer);
-        map.removeLayer(lineLayer);
-    }
+    document.getElementById('label-btn').classList.toggle('inactive', !showLabels);
+    if (showLabels) { labelLayer.addTo(map); lineLayer.addTo(map); drawSmartLabels(); }
+    else { map.removeLayer(labelLayer); map.removeLayer(lineLayer); }
 }
 
 function drawSmartLabels() {
-    labelLayer.clearLayers();
-    lineLayer.clearLayers();
+    labelLayer.clearLayers(); lineLayer.clearLayers();
     if (!showLabels || !geoLayer) return;
-
     const usedSpaces = [];
-    
-    // 國家標籤
     geoLayer.eachLayer(layer => {
-        const name = layer.feature.properties.name;
-        if (!visitedCountries.includes(name)) return;
-        createLabel(layer.getBounds().getCenter(), name, usedSpaces, layer.getBounds());
-    });
-
-    // 自定義點標籤
-    customPOIs.forEach(poi => {
-        if (visitedCountries.includes(poi.name)) {
-            createLabel(L.latLng(poi.coords), poi.name, usedSpaces, null, true);
+        if (visitedCountries.includes(layer.feature.properties.name)) {
+            createLabel(layer.getBounds().getCenter(), layer.feature.properties.name, usedSpaces, layer.getBounds());
         }
+    });
+    customPOIs.forEach(poi => {
+        if (visitedCountries.includes(poi.name)) createLabel(L.latLng(poi.coords), poi.name, usedSpaces, null, true);
     });
 }
 
 function createLabel(center, name, usedSpaces, bounds, isPOI = false) {
     let labelPos = center;
-    let needLine = false;
-
     if (isPOI || (bounds && (bounds.getNorth() - bounds.getSouth() < 5))) {
         const zoom = map.getZoom();
         const offset = 10 / Math.pow(2, zoom - 2);
         labelPos = L.latLng(center.lat + offset, center.lng + offset * 1.5);
-        needLine = true;
-    }
-
-    usedSpaces.push(labelPos);
-    if (needLine) {
         L.polyline([center, labelPos], { color: '#333', weight: 1, dashArray: '3,3' }).addTo(lineLayer);
     }
-
     L.marker(labelPos, {
-        icon: L.divIcon({
-            className: 'country-label',
-            html: name,
-            iconSize: null,
-            iconAnchor: [-2, 10]
-        })
+        icon: L.divIcon({ className: 'country-label', html: name, iconSize: null, iconAnchor: [-2, 10] })
     }).addTo(labelLayer);
 }
 
-// 備份與匯入
 function exportBackup() {
-    if (visitedCountries.length === 0) return alert("目前沒有資料！");
-    const dataStr = JSON.stringify(visitedCountries);
-    navigator.clipboard.writeText(dataStr).then(() => alert("✅ 備份代碼已複製！")).catch(() => prompt("請複製：", dataStr));
+    const data = JSON.stringify(visitedCountries);
+    navigator.clipboard.writeText(data).then(() => alert("✅ 備份代碼已複製！"));
 }
 
 function triggerImport() {
     const code = prompt("請貼上備份代碼：");
-    if (!code) return;
-    try {
-        const importedData = JSON.parse(code);
-        if (Array.isArray(importedData)) {
-            visitedCountries = importedData;
-            saveToStorage();
+    if (code) {
+        try {
+            visitedCountries = JSON.parse(code);
+            localStorage.setItem('myVisitedCountries', JSON.stringify(visitedCountries));
             updateUI();
-            alert("🎉 匯入完成！");
-        }
-    } catch (err) { alert("❌ 解析失敗！"); }
+        } catch (e) { alert("解析失敗"); }
+    }
 }
 
 map.on('zoomend', drawSmartLabels);
