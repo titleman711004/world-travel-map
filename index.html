@@ -10,10 +10,7 @@
 
     <style>
         :root { --panel-bg: rgba(255, 255, 255, 0.98); --primary: #2c3e50; }
-        
-        /* 核心修正：確保寬度計算包含內距，防止右偏移 */
         * { box-sizing: border-box; }
-
         body { margin: 0; font-family: "Microsoft JhengHei", sans-serif; overflow: hidden; background: #d1ecf1; }
         #map { height: 100vh; width: 100vw; background: #d1ecf1; }
         
@@ -23,14 +20,15 @@
             padding: 15px 25px; border-radius: 0; display: block;
         }
 
+        /* --- 工具列容器 --- */
         .side-panel { position: fixed; z-index: 1001; }
 
         @media (min-width: 769px) {
             .side-panel {
                 top: 20px; left: 20px; width: 300px;
-                background: var(--panel-bg);
-                border-radius: 0; max-height: 90vh;
-                padding: 20px; display: flex; flex-direction: column; gap: 10px;
+                background: var(--panel-bg); border-radius: 0;
+                max-height: 90vh; padding: 20px;
+                display: flex; flex-direction: column; gap: 10px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.15);
             }
             .mobile-handle { display: none; }
@@ -38,17 +36,24 @@
 
         @media (max-width: 768px) {
             .side-panel {
-                bottom: 0; left: 0; right: 0; width: 100%;
-                border-radius: 0; pointer-events: none;
+                bottom: 0; left: 0; width: 100%;
+                pointer-events: none; /* 平時點擊穿透 */
             }
+
+            /* 修正把手位置：貼緊最下方，水平置中 */
             .mobile-handle {
                 pointer-events: auto;
-                height: 45px; width: 140px; margin: 0 auto;
+                position: absolute;
+                bottom: 0; left: 50%;
+                transform: translateX(-50%); /* 完美的水平置中 */
+                height: 45px; width: 140px;
                 background: var(--panel-bg);
                 display: flex; align-items: center; justify-content: center;
                 font-weight: bold; color: var(--primary); cursor: pointer;
                 box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+                z-index: 1002;
             }
+
             .panel-content {
                 pointer-events: auto;
                 background: var(--panel-bg);
@@ -58,11 +63,14 @@
                 transform: translateY(100%);
                 box-shadow: 0 -2px 20px rgba(0,0,0,0.15);
             }
+
+            /* 展開時內容往上推，把手跟著往上移動 */
             .side-panel.open .panel-content { transform: translateY(0); }
+            .side-panel.open .mobile-handle { bottom: 65vh; transform: translateX(-50%) translateY(100%); display: none; } 
+            /* 註：展開後如果不想看到把手可以像上面那樣 display: none，或微調 bottom */
         }
 
         .section-title { font-size: 14px; font-weight: bold; margin-top: 15px; border-left: 4px solid var(--primary); padding-left: 8px; margin-bottom: 8px; }
-        
         .btn-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 10px 0; }
         .btn { padding: 8px 2px; border: none; border-radius: 0; cursor: pointer; font-size: 11px; font-weight: bold; text-align: center; color: white; width: 100%; }
         .btn-reset { background: #7f8c8d; }
@@ -79,16 +87,7 @@
         .popup-btn { background: var(--primary); color: white; border: none; padding: 10px; border-radius: 0; margin-top: 8px; cursor: pointer; width: 100%; }
         select { border-radius: 0; padding: 5px; border: 1px solid #ccc; }
 
-        /* 版權宣告樣式 */
-        .copyright {
-            margin-top: 20px;
-            padding-top: 10px;
-            border-top: 1px solid #eee;
-            font-size: 10px;
-            color: #999;
-            text-align: center;
-            letter-spacing: 0.5px;
-        }
+        .copyright { margin-top: 20px; padding-top: 10px; border-top: 1px solid #eee; font-size: 10px; color: #999; text-align: center; }
     </style>
 </head>
 <body>
@@ -97,7 +96,8 @@
 <div id="map"></div>
 
 <div class="side-panel" id="ui-panel">
-    <div class="mobile-handle" onclick="togglePanel()">展開/收合</div>
+    <div class="mobile-handle" id="main-handle" onclick="togglePanel()">展開/收合</div>
+    
     <div class="panel-content">
         <div class="section-title">➕ 新增自定義地點</div>
         <div class="input-group">
@@ -132,160 +132,53 @@
         <div class="section-title">📍 已去過</div>
         <ul id="country-list"></ul>
 
-        <div class="copyright">
-            Copyright © Titleman Cloud
-        </div>
+        <div class="copyright">Copyright © Titleman Cloud</div>
+        <button class="popup-btn" style="background:#7f8c8d; margin-top:15px;" onclick="togglePanel()">收合清單</button>
     </div>
 </div>
 
 <script>
+// ... (保留之前的 JS 邏輯不變) ...
 let visitedCountries = JSON.parse(localStorage.getItem('myVisitedCountries')) || [];
 let customPOIs = JSON.parse(localStorage.getItem('myCustomPOIs')) || [
     { name: "Guam (關島)", coords: [13.4443, 144.7937] },
     { name: "Subic Bay (蘇比克灣)", coords: [14.8219, 120.2762] }
 ];
-
 let geoLayer, poiLayers = L.layerGroup();
+const map = L.map('map', { attributionControl: false, zoomSnap: 0.1, zoomControl: false, maxBounds: [[-90, -200], [90, 200]], maxBoundsViscosity: 1.0 });
 
-const map = L.map('map', {
-    attributionControl: false, zoomSnap: 0.1, zoomControl: false,
-    maxBounds: [[-90, -200], [90, 200]], maxBoundsViscosity: 1.0
-});
-
-function autoFitWorld() {
-    const zoomLevel = window.innerWidth < 768 ? 1.0 : 2.2;
-    map.setView([20, 10], zoomLevel);
-}
+function autoFitWorld() { const zoomLevel = window.innerWidth < 768 ? 1.0 : 2.2; map.setView([20, 10], zoomLevel); }
 autoFitWorld();
 poiLayers.addTo(map);
 
-map.on('click', (e) => {
-    document.getElementById('poi-lat').value = e.latlng.lat.toFixed(4);
-    document.getElementById('poi-lng').value = e.latlng.lng.toFixed(4);
-});
+map.on('click', (e) => { document.getElementById('poi-lat').value = e.latlng.lat.toFixed(4); document.getElementById('poi-lng').value = e.latlng.lng.toFixed(4); });
 
 fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson')
-    .then(r => r.json())
-    .then(data => {
+    .then(r => r.json()).then(data => {
         document.getElementById('loader').style.display = 'none';
-        geoLayer = L.geoJson(data, {
-            style: styleFunc,
-            onEachFeature: (f, l) => {
-                l.on('click', (e) => {
-                    L.DomEvent.stopPropagation(e);
-                    showPopup(e.latlng, f.properties.name);
-                });
-            }
-        }).addTo(map);
+        geoLayer = L.geoJson(data, { style: styleFunc, onEachFeature: (f, l) => { l.on('click', (e) => { L.DomEvent.stopPropagation(e); showPopup(e.latlng, f.properties.name); }); } }).addTo(map);
         updateUI();
     });
 
-function styleFunc(feature) {
-    const visitColor = document.getElementById('visit-color-select').value;
-    return {
-        fillColor: visitedCountries.includes(feature.properties.name) ? visitColor : "#e9e9e9",
-        weight: 1, color: "#ffffff", fillOpacity: 1
-    };
-}
-
-function showPopup(latlng, name) {
-    const isVisited = visitedCountries.includes(name);
-    const btnText = isVisited ? "❌ 移除足跡" : "✅ 標記足跡";
-    L.popup()
-        .setLatLng(latlng)
-        .setContent(`<strong>${name}</strong><br><button class="popup-btn" onclick="toggleCountry('${name}')">${btnText}</button>`)
-        .openOn(map);
-}
-
-function toggleCountry(name) {
-    const i = visitedCountries.indexOf(name);
-    if (i > -1) visitedCountries.splice(i, 1);
-    else visitedCountries.push(name);
-    saveData();
-    updateUI();
-    map.closePopup();
-}
-
-function addNewPOI() {
-    const name = document.getElementById('poi-name').value;
-    const lat = parseFloat(document.getElementById('poi-lat').value);
-    const lng = parseFloat(document.getElementById('poi-lng').value);
-    if (!name || isNaN(lat) || isNaN(lng)) return alert("請填寫完整資訊！");
-    customPOIs.push({ name: name, coords: [lat, lng] });
-    saveData();
-    updateUI();
-    alert("已新增自定義地點！");
-}
-
-function drawCustomPOIs() {
-    poiLayers.clearLayers();
-    const visitColor = document.getElementById('visit-color-select').value;
-    customPOIs.forEach(poi => {
-        const isVisited = visitedCountries.includes(poi.name);
-        L.circleMarker(poi.coords, {
-            radius: 4, fillColor: isVisited ? visitColor : "#e9e9e9",
-            color: "#333", weight: 0.8, fillOpacity: 1
-        }).addTo(poiLayers).on('click', (e) => {
-            L.DomEvent.stopPropagation(e);
-            showPopup(poi.coords, poi.name);
-        });
-    });
-}
-
-function saveData() {
-    localStorage.setItem('myVisitedCountries', JSON.stringify(visitedCountries));
-    localStorage.setItem('myCustomPOIs', JSON.stringify(customPOIs));
-}
-
-function updateUI() {
-    document.getElementById('map').style.background = document.getElementById('bg-color-select').value;
-    if (geoLayer) geoLayer.setStyle(styleFunc);
-    drawCustomPOIs();
-    const listEl = document.getElementById('country-list');
-    listEl.innerHTML = visitedCountries.length > 0 
-        ? visitedCountries.map(name => `<li onclick="focusCountry('${name}')">📍 ${name}</li>`).join('')
-        : '<li style="color:#999; justify-content:center;">尚未標記任何足跡</li>';
-}
-
-function focusCountry(name) {
-    if (window.innerWidth <= 768) togglePanel();
-    let found = false;
-    geoLayer.eachLayer(layer => {
-        if (layer.feature.properties.name === name) {
-            map.flyToBounds(layer.getBounds(), { padding: [50, 50], duration: 1.2 });
-            found = true;
-        }
-    });
-    if (!found) {
-        const poi = customPOIs.find(p => p.name === name);
-        if (poi) map.flyTo(poi.coords, 7, { duration: 1.2 });
+function styleFunc(feature) { const visitColor = document.getElementById('visit-color-select').value; return { fillColor: visitedCountries.includes(feature.properties.name) ? visitColor : "#e9e9e9", weight: 1, color: "#ffffff", fillOpacity: 1 }; }
+function showPopup(latlng, name) { const isVisited = visitedCountries.includes(name); const btnText = isVisited ? "❌ 移除足跡" : "✅ 標記足跡"; L.popup().setLatLng(latlng).setContent(`<strong>${name}</strong><br><button class="popup-btn" onclick="toggleCountry('${name}')">${btnText}</button>`).openOn(map); }
+function toggleCountry(name) { const i = visitedCountries.indexOf(name); if (i > -1) visitedCountries.splice(i, 1); else visitedCountries.push(name); saveData(); updateUI(); map.closePopup(); }
+function addNewPOI() { const name = document.getElementById('poi-name').value; const lat = parseFloat(document.getElementById('poi-lat').value); const lng = parseFloat(document.getElementById('poi-lng').value); if (!name || isNaN(lat) || isNaN(lng)) return alert("請填寫完整資訊！"); customPOIs.push({ name: name, coords: [lat, lng] }); saveData(); updateUI(); alert("已新增自定義地點！"); }
+function drawCustomPOIs() { poiLayers.clearLayers(); const visitColor = document.getElementById('visit-color-select').value; customPOIs.forEach(poi => { const isVisited = visitedCountries.includes(poi.name); L.circleMarker(poi.coords, { radius: 4, fillColor: isVisited ? visitColor : "#e9e9e9", color: "#333", weight: 0.8, fillOpacity: 1 }).addTo(poiLayers).on('click', (e) => { L.DomEvent.stopPropagation(e); showPopup(poi.coords, poi.name); }); }); }
+function saveData() { localStorage.setItem('myVisitedCountries', JSON.stringify(visitedCountries)); localStorage.setItem('myCustomPOIs', JSON.stringify(customPOIs)); }
+function updateUI() { document.getElementById('map').style.background = document.getElementById('bg-color-select').value; if (geoLayer) geoLayer.setStyle(styleFunc); drawCustomPOIs(); const listEl = document.getElementById('country-list'); listEl.innerHTML = visitedCountries.length > 0 ? visitedCountries.map(name => `<li onclick="focusCountry('${name}')">📍 ${name}</li>`).join('') : '<li style="color:#999; justify-content:center;">尚未標記任何足跡</li>'; }
+function focusCountry(name) { if (window.innerWidth <= 768) togglePanel(); let found = false; geoLayer.eachLayer(layer => { if (layer.feature.properties.name === name) { map.flyToBounds(layer.getBounds(), { padding: [50, 50], duration: 1.2 }); found = true; } }); if (!found) { const poi = customPOIs.find(p => p.name === name); if (poi) map.flyTo(poi.coords, 7, { duration: 1.2 }); } }
+function togglePanel() { 
+    if (window.innerWidth <= 768) {
+        document.getElementById('ui-panel').classList.toggle('open');
+        // 展開時隱藏下方把手，避免擋到內容
+        const handle = document.getElementById('main-handle');
+        handle.style.opacity = document.getElementById('ui-panel').classList.contains('open') ? "0" : "1";
     }
 }
-
-function togglePanel() {
-    if (window.innerWidth <= 768) document.getElementById('ui-panel').classList.toggle('open');
-}
-
 function resetView() { autoFitWorld(); }
-
-function exportBackup() {
-    const data = { v: visitedCountries, p: customPOIs };
-    navigator.clipboard.writeText(JSON.stringify(data)).then(() => alert("✅ 備份代碼已複製！"));
-}
-
-function triggerImport() {
-    const code = prompt("請貼上備份代碼：");
-    if (code) {
-        try {
-            const data = JSON.parse(code);
-            visitedCountries = data.v || [];
-            customPOIs = data.p || [];
-            saveData(); updateUI();
-            alert("匯入成功！");
-        } catch (e) { alert("解析失敗。"); }
-    }
-}
-
+function exportBackup() { const data = { v: visitedCountries, p: customPOIs }; navigator.clipboard.writeText(JSON.stringify(data)).then(() => alert("✅ 備份代碼已複製！")); }
+function triggerImport() { const code = prompt("請貼上備份代碼："); if (code) { try { const data = JSON.parse(code); visitedCountries = data.v || []; customPOIs = data.p || []; saveData(); updateUI(); alert("匯入成功！"); } catch (e) { alert("解析失敗。"); } } }
 function updateStyles() { updateUI(); }
 </script>
 </body>
