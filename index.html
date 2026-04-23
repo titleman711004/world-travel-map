@@ -10,8 +10,6 @@
     <style>
         :root { --panel-bg: rgba(255, 255, 255, 0.95); }
         body { margin: 0; font-family: "Microsoft JhengHei", sans-serif; overflow: hidden; }
-        
-        /* 設定地圖背景色，並限制不重複顯示 */
         #map { height: 100vh; background: #d1ecf1; }
 
         .side-panel {
@@ -91,21 +89,27 @@
 <div id="map"></div>
 
 <script>
-// --- 初始化資料 ---
+// --- 1. 初始化資料與自定義點位 ---
 let visitedCountries = JSON.parse(localStorage.getItem('myVisitedCountries')) || [];
 let showLabels = true;
 let geoLayer;
 let labelLayer = L.layerGroup();
 let lineLayer = L.layerGroup();
+let poiLayers = L.layerGroup();
 
-// 1. 初始化地圖：增加限制邊界，防止左右重複
+// 自定義座標：解決 GeoJSON 缺少的小地點
+const customPOIs = [
+    { name: "Guam (關島)", coords: [13.4443, 144.7937] },
+    { name: "Subic Bay (蘇比克灣)", coords: [14.8219, 120.2762] }
+];
+
 const map = L.map('map', {
     attributionControl: false,
     zoomSnap: 0.1,
     zoomControl: false,
-    worldCopyJump: false, // 禁止重複複製地圖
-    maxBounds: [[-90, -180], [90, 180]], // 限制滑動範圍在世界經緯度內
-    maxBoundsViscosity: 1.0 // 拖動到邊界時強制反彈
+    worldCopyJump: false,
+    maxBounds: [[-90, -180], [90, 180]],
+    maxBoundsViscosity: 1.0
 }).setView([20, 0], 2);
 
 L.control.zoom({ position: 'topright' }).addTo(map);
@@ -127,12 +131,7 @@ fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/mast
     })
     .catch(err => alert("地圖載入失敗！"));
 
-// 3. 視角控制
-function resetView() {
-    map.flyTo([20, 0], 2, { duration: 1.5 });
-}
-
-// 4. 核心邏輯
+// 3. 核心邏輯
 function styleFunc(feature) {
     const visitColor = document.getElementById('visit-color-select').value;
     const isVisited = visitedCountries.includes(feature.properties.name);
@@ -146,9 +145,35 @@ function styleFunc(feature) {
 
 function updateStyles() {
     const bgColor = document.getElementById('bg-color-select').value;
+    const visitColor = document.getElementById('visit-color-select').value;
     document.getElementById('map').style.background = bgColor;
+    
     if (geoLayer) geoLayer.setStyle(styleFunc);
+    
+    drawCustomPOIs(visitColor); // 繪製關島/蘇比克灣圓點
     drawSmartLabels();
+}
+
+// 繪製自定義小點
+function drawCustomPOIs(visitColor) {
+    poiLayers.clearLayers();
+    customPOIs.forEach(poi => {
+        const isVisited = visitedCountries.includes(poi.name);
+        const circle = L.circleMarker(poi.coords, {
+            radius: 4,
+            fillColor: isVisited ? visitColor : "#e9e9e9",
+            color: "#333",
+            weight: 0.8,
+            fillOpacity: 1
+        }).on('click', (e) => {
+            L.DomEvent.stopPropagation(e);
+            toggleCountry(poi.name);
+        });
+        
+        circle.bindTooltip(poi.name, { direction: 'top', offset: [0, -3] });
+        circle.addTo(poiLayers);
+    });
+    poiLayers.addTo(map);
 }
 
 function toggleCountry(name) {
@@ -176,51 +201,25 @@ function saveToStorage() {
     localStorage.setItem('myVisitedCountries', JSON.stringify(visitedCountries));
 }
 
-// 5. 代碼版備份功能
-function exportBackup() {
-    if (visitedCountries.length === 0) {
-        alert("目前沒有資料可以備份！");
-        return;
-    }
-    const dataStr = JSON.stringify(visitedCountries);
-    
-    // 複製到剪貼簿
-    navigator.clipboard.writeText(dataStr).then(() => {
-        alert("✅ 備份代碼已複製到剪貼簿！\n請貼上到記事本儲存。");
-    }).catch(err => {
-        prompt("請複製下方的備份代碼：", dataStr);
-    });
+// 4. 功能性函式
+function resetView() {
+    map.flyTo([20, 0], 2, { duration: 1.5 });
 }
 
-function triggerImport() {
-    const code = prompt("請貼上您的備份代碼 (JSON 格式)：");
-    if (!code) return;
-
-    try {
-        const importedData = JSON.parse(code);
-        if (Array.isArray(importedData)) {
-            if (confirm(`確定要匯入這 ${importedData.length} 個國家嗎？\n這將會覆蓋您目前的紀錄！`)) {
-                visitedCountries = importedData;
-                saveToStorage();
-                updateUI();
-                alert("🎉 匯入完成！");
-            }
-        } else {
-            alert("❌ 代碼格式不正確，請確保貼上的是完整的備份陣列。");
-        }
-    } catch (err) {
-        alert("❌ 解析失敗！請確保貼上的代碼完整無誤。");
-    }
-}
-
-// 6. 標籤與縮放
 function focusCountry(name) {
-    if (!geoLayer) return;
+    let found = false;
+    // 搜尋國家
     geoLayer.eachLayer(layer => {
         if (layer.feature.properties.name === name) {
             map.flyToBounds(layer.getBounds(), { padding: [40, 40], duration: 1.2 });
+            found = true;
         }
     });
+    // 搜尋自定義點
+    if (!found) {
+        const poi = customPOIs.find(p => p.name === name);
+        if (poi) map.flyTo(poi.coords, 7, { duration: 1.2 });
+    }
 }
 
 function toggleLabels() {
@@ -245,46 +244,67 @@ function drawSmartLabels() {
     if (!showLabels || !geoLayer) return;
 
     const usedSpaces = [];
+    
+    // 國家標籤
     geoLayer.eachLayer(layer => {
         const name = layer.feature.properties.name;
         if (!visitedCountries.includes(name)) return;
+        createLabel(layer.getBounds().getCenter(), name, usedSpaces, layer.getBounds());
+    });
 
-        const bounds = layer.getBounds();
-        const center = bounds.getCenter();
-        const latSpan = bounds.getNorth() - bounds.getSouth();
-        const lngSpan = bounds.getEast() - bounds.getWest();
-
-        let labelPos = center;
-        let needLine = false;
-
-        // 判定島嶼或小國的標籤偏移
-        if (latSpan < 5 || lngSpan < 5 || checkCollision(center, usedSpaces)) {
-            const zoom = map.getZoom();
-            const offset = 12 / Math.pow(2, zoom - 2);
-            labelPos = L.latLng(center.lat + offset, center.lng + offset * 1.5);
-            needLine = true;
+    // 自定義點標籤
+    customPOIs.forEach(poi => {
+        if (visitedCountries.includes(poi.name)) {
+            createLabel(L.latLng(poi.coords), poi.name, usedSpaces, null, true);
         }
-
-        usedSpaces.push(labelPos);
-        if (needLine) {
-            L.polyline([center, labelPos], { color: '#333', weight: 1, dashArray: '3,3' }).addTo(lineLayer);
-        }
-
-        L.marker(labelPos, {
-            icon: L.divIcon({
-                className: 'country-label',
-                html: name,
-                iconSize: null,
-                iconAnchor: [-2, 10]
-            })
-        }).addTo(labelLayer);
     });
 }
 
-function checkCollision(pos, usedSpaces) {
-    return usedSpaces.some(space => 
-        Math.abs(pos.lat - space.lat) < 2.5 && Math.abs(pos.lng - space.lng) < 6
-    );
+function createLabel(center, name, usedSpaces, bounds, isPOI = false) {
+    let labelPos = center;
+    let needLine = false;
+
+    if (isPOI || (bounds && (bounds.getNorth() - bounds.getSouth() < 5))) {
+        const zoom = map.getZoom();
+        const offset = 10 / Math.pow(2, zoom - 2);
+        labelPos = L.latLng(center.lat + offset, center.lng + offset * 1.5);
+        needLine = true;
+    }
+
+    usedSpaces.push(labelPos);
+    if (needLine) {
+        L.polyline([center, labelPos], { color: '#333', weight: 1, dashArray: '3,3' }).addTo(lineLayer);
+    }
+
+    L.marker(labelPos, {
+        icon: L.divIcon({
+            className: 'country-label',
+            html: name,
+            iconSize: null,
+            iconAnchor: [-2, 10]
+        })
+    }).addTo(labelLayer);
+}
+
+// 備份與匯入
+function exportBackup() {
+    if (visitedCountries.length === 0) return alert("目前沒有資料！");
+    const dataStr = JSON.stringify(visitedCountries);
+    navigator.clipboard.writeText(dataStr).then(() => alert("✅ 備份代碼已複製！")).catch(() => prompt("請複製：", dataStr));
+}
+
+function triggerImport() {
+    const code = prompt("請貼上備份代碼：");
+    if (!code) return;
+    try {
+        const importedData = JSON.parse(code);
+        if (Array.isArray(importedData)) {
+            visitedCountries = importedData;
+            saveToStorage();
+            updateUI();
+            alert("🎉 匯入完成！");
+        }
+    } catch (err) { alert("❌ 解析失敗！"); }
 }
 
 map.on('zoomend', drawSmartLabels);
