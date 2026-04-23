@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>旅遊足跡 - 完整版</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root { --panel-bg: rgba(255, 255, 255, 0.95); }
+        body { margin: 0; font-family: "Microsoft JhengHei", sans-serif; overflow: hidden; }
+        
+        /* 設定地圖背景色，並限制不重複顯示 */
+        #map { height: 100vh; background: #d1ecf1; }
+
+        .side-panel {
+            position: fixed; top: 20px; left: 20px; z-index: 1000;
+            width: 280px; background: var(--panel-bg);
+            padding: 20px; border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            max-height: 90vh; display: flex; flex-direction: column; gap: 10px;
+        }
+
+        .section-title { font-size: 14px; font-weight: bold; color: #333; margin-top: 10px; border-left: 4px solid #2c3e50; padding-left: 8px; }
+        select { width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc; }
+
+        #country-list {
+            list-style: none; padding: 0; margin: 0; overflow-y: auto;
+            border-top: 1px solid #eee; flex-grow: 1; min-height: 100px;
+        }
+        #country-list li {
+            padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer;
+            display: flex; justify-content: space-between; font-size: 13px;
+        }
+        #country-list li:hover { background: #f8f9fa; color: #007bff; }
+
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+        .btn {
+            padding: 8px; border: none; border-radius: 5px; cursor: pointer;
+            font-weight: bold; transition: 0.3s; font-size: 12px; text-align: center;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .btn-toggle { background: #2c3e50; color: white; grid-column: span 2; }
+        .btn-reset { background: #7f8c8d; color: white; grid-column: span 2; }
+        .btn-save { background: #27ae60; color: white; }
+        .btn-load { background: #2980b9; color: white; }
+        .btn-toggle.inactive { background: #95a5a6; }
+
+        .country-label {
+            background: white; border: 1px solid #333; padding: 2px 6px;
+            border-radius: 3px; font-size: 11px; font-weight: bold;
+            white-space: nowrap; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="side-panel">
+    <div class="section-title">🎨 地圖風格</div>
+    <select id="bg-color-select" onchange="updateStyles()">
+        <option value="#f8d7da">淡紅</option>
+        <option value="#fff3cd">淡黃</option>
+        <option value="#d4edda">淡綠</option>
+        <option value="#d1ecf1" selected>淡藍 (海洋)</option>
+        <option value="#cce5ff">淡靛</option>
+        <option value="#333333">黑色</option>
+        <option value="#ffffff">白色</option>
+    </select>
+
+    <select id="visit-color-select" onchange="updateStyles()">
+        <option value="#ff4757" selected>去過：鮮紅</option>
+        <option value="#ffa502">去過：橘色</option>
+        <option value="#2ed573">去過：翠綠</option>
+        <option value="#1e90ff">去過：道奇藍</option>
+    </select>
+
+    <button id="label-btn" class="btn btn-toggle" onclick="toggleLabels()">🏷️ 隱藏名稱</button>
+
+    <div class="section-title">💾 資料與視角</div>
+    <div class="btn-group">
+        <button class="btn btn-reset" onclick="resetView()">🌐 初始全圖 (不重複)</button>
+        <button class="btn btn-save" onclick="exportBackup()">📋 複製備份代碼</button>
+        <button class="btn btn-load" onclick="triggerImport()">📥 貼上代碼匯入</button>
+    </div>
+
+    <div class="section-title">🚩 已去過 (自動存檔)</div>
+    <ul id="country-list"></ul>
+</div>
+
+<div id="map"></div>
+
+<script>
+// --- 初始化資料 ---
+let visitedCountries = JSON.parse(localStorage.getItem('myVisitedCountries')) || [];
+let showLabels = true;
+let geoLayer;
+let labelLayer = L.layerGroup();
+let lineLayer = L.layerGroup();
+
+// 1. 初始化地圖：增加限制邊界，防止左右重複
+const map = L.map('map', {
+    attributionControl: false,
+    zoomSnap: 0.1,
+    zoomControl: false,
+    worldCopyJump: false, // 禁止重複複製地圖
+    maxBounds: [[-90, -180], [90, 180]], // 限制滑動範圍在世界經緯度內
+    maxBoundsViscosity: 1.0 // 拖動到邊界時強制反彈
+}).setView([20, 0], 2);
+
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+// 2. 載入 GeoJSON
+fetch('https://raw.githubusercontent.com/datasets/geo-boundaries-world-110m/master/countries.geojson')
+    .then(r => r.json())
+    .then(data => {
+        geoLayer = L.geoJson(data, {
+            style: styleFunc,
+            onEachFeature: (f, l) => {
+                l.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    toggleCountry(f.properties.name);
+                });
+            }
+        }).addTo(map);
+        updateUI();
+    })
+    .catch(err => alert("地圖載入失敗！"));
+
+// 3. 視角控制
+function resetView() {
+    map.flyTo([20, 0], 2, { duration: 1.5 });
+}
+
+// 4. 核心邏輯
+function styleFunc(feature) {
+    const visitColor = document.getElementById('visit-color-select').value;
+    const isVisited = visitedCountries.includes(feature.properties.name);
+    return {
+        fillColor: isVisited ? visitColor : "#e9e9e9",
+        weight: 1,
+        color: "#ffffff",
+        fillOpacity: 1
+    };
+}
+
+function updateStyles() {
+    const bgColor = document.getElementById('bg-color-select').value;
+    document.getElementById('map').style.background = bgColor;
+    if (geoLayer) geoLayer.setStyle(styleFunc);
+    drawSmartLabels();
+}
+
+function toggleCountry(name) {
+    const i = visitedCountries.indexOf(name);
+    if (i > -1) visitedCountries.splice(i, 1);
+    else visitedCountries.push(name);
+    
+    saveToStorage();
+    updateUI();
+}
+
+function updateUI() {
+    updateStyles();
+    updateCountryList();
+}
+
+function updateCountryList() {
+    const listEl = document.getElementById('country-list');
+    listEl.innerHTML = visitedCountries.length > 0 
+        ? visitedCountries.map(name => `<li onclick="focusCountry('${name}')"><span>📍 ${name}</span> 🔍</li>`).join('')
+        : '<li style="color:#999; justify-content:center;">尚未標記國家</li>';
+}
+
+function saveToStorage() {
+    localStorage.setItem('myVisitedCountries', JSON.stringify(visitedCountries));
+}
+
+// 5. 代碼版備份功能
+function exportBackup() {
+    if (visitedCountries.length === 0) {
+        alert("目前沒有資料可以備份！");
+        return;
+    }
+    const dataStr = JSON.stringify(visitedCountries);
+    
+    // 複製到剪貼簿
+    navigator.clipboard.writeText(dataStr).then(() => {
+        alert("✅ 備份代碼已複製到剪貼簿！\n請貼上到記事本儲存。");
+    }).catch(err => {
+        prompt("請複製下方的備份代碼：", dataStr);
+    });
+}
+
+function triggerImport() {
+    const code = prompt("請貼上您的備份代碼 (JSON 格式)：");
+    if (!code) return;
+
+    try {
+        const importedData = JSON.parse(code);
+        if (Array.isArray(importedData)) {
+            if (confirm(`確定要匯入這 ${importedData.length} 個國家嗎？\n這將會覆蓋您目前的紀錄！`)) {
+                visitedCountries = importedData;
+                saveToStorage();
+                updateUI();
+                alert("🎉 匯入完成！");
+            }
+        } else {
+            alert("❌ 代碼格式不正確，請確保貼上的是完整的備份陣列。");
+        }
+    } catch (err) {
+        alert("❌ 解析失敗！請確保貼上的代碼完整無誤。");
+    }
+}
+
+// 6. 標籤與縮放
+function focusCountry(name) {
+    if (!geoLayer) return;
+    geoLayer.eachLayer(layer => {
+        if (layer.feature.properties.name === name) {
+            map.flyToBounds(layer.getBounds(), { padding: [40, 40], duration: 1.2 });
+        }
+    });
+}
+
+function toggleLabels() {
+    showLabels = !showLabels;
+    const btn = document.getElementById('label-btn');
+    btn.innerText = showLabels ? "🏷️ 隱藏名稱" : "🏷️ 顯示名稱";
+    btn.classList.toggle('inactive', !showLabels);
+    
+    if (showLabels) {
+        labelLayer.addTo(map);
+        lineLayer.addTo(map);
+        drawSmartLabels();
+    } else {
+        map.removeLayer(labelLayer);
+        map.removeLayer(lineLayer);
+    }
+}
+
+function drawSmartLabels() {
+    labelLayer.clearLayers();
+    lineLayer.clearLayers();
+    if (!showLabels || !geoLayer) return;
+
+    const usedSpaces = [];
+    geoLayer.eachLayer(layer => {
+        const name = layer.feature.properties.name;
+        if (!visitedCountries.includes(name)) return;
+
+        const bounds = layer.getBounds();
+        const center = bounds.getCenter();
+        const latSpan = bounds.getNorth() - bounds.getSouth();
+        const lngSpan = bounds.getEast() - bounds.getWest();
+
+        let labelPos = center;
+        let needLine = false;
+
+        // 判定島嶼或小國的標籤偏移
+        if (latSpan < 5 || lngSpan < 5 || checkCollision(center, usedSpaces)) {
+            const zoom = map.getZoom();
+            const offset = 12 / Math.pow(2, zoom - 2);
+            labelPos = L.latLng(center.lat + offset, center.lng + offset * 1.5);
+            needLine = true;
+        }
+
+        usedSpaces.push(labelPos);
+        if (needLine) {
+            L.polyline([center, labelPos], { color: '#333', weight: 1, dashArray: '3,3' }).addTo(lineLayer);
+        }
+
+        L.marker(labelPos, {
+            icon: L.divIcon({
+                className: 'country-label',
+                html: name,
+                iconSize: null,
+                iconAnchor: [-2, 10]
+            })
+        }).addTo(labelLayer);
+    });
+}
+
+function checkCollision(pos, usedSpaces) {
+    return usedSpaces.some(space => 
+        Math.abs(pos.lat - space.lat) < 2.5 && Math.abs(pos.lng - space.lng) < 6
+    );
+}
+
+map.on('zoomend', drawSmartLabels);
+</script>
+
+</body>
+</html>
