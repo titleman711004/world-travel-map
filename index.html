@@ -180,8 +180,8 @@ function drawCustomPOIs() {
     customPOIs.forEach(poi => {
         const isVisited = visitedCountries.includes(poi.name);
         const circle = L.circleMarker(poi.coords, {
-            radius: 2.5, fillColor: isVisited ? visitColor : "#e9e9e9",
-            color: "#333", weight: 0.5, fillOpacity: 1
+            radius: 1.5, fillColor: isVisited ? visitColor : "#e9e9e9",
+            color: "#333", weight: 0.1, fillOpacity: 1
         }).addTo(poiLayers);
 
         circle.on('click', (e) => {
